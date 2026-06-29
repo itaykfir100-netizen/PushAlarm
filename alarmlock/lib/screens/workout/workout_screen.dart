@@ -73,15 +73,17 @@ class _WorkoutScreenState extends State<WorkoutScreen>
   }
 
   Future<void> _startAlarmSound() async {
+    // A real alarm plays audio in the background isolate (alarmCallback).
+    // Only play here when coming from the simulate button (no active alarm).
+    final isSimulate = !(await AlarmService.instance.hasActiveAlarm());
+    if (!isSimulate) return;
+
     try {
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      // Android system alarm sound URI
       await _audioPlayer.play(
         UrlSource('content://settings/system/alarm_alert'),
       );
-    } catch (_) {
-      // Fallback: silence — alarm was already triggered via notification sound
-    }
+    } catch (_) {}
   }
 
   Future<void> _initCamera() async {

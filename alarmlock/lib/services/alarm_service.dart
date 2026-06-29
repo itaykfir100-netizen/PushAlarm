@@ -1,17 +1,44 @@
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/alarm.dart';
 import 'notification_service.dart';
 
 const _activeAlarmKey = 'active_alarm_id';
 
-// Top-level callback — runs in a background isolate when an alarm fires.
+// Runs in a background isolate inside android_alarm_manager_plus's foreground
+// service. Plays looping alarm audio and keeps running until the user finishes
+// their push-ups (which clears _activeAlarmKey from SharedPreferences).
 @pragma('vm:entry-point')
 Future<void> alarmCallback(int id) async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   final prefs = await SharedPreferences.getInstance();
   await prefs.setInt(_activeAlarmKey, id);
+
   await NotificationService.instance.initialize();
   await NotificationService.instance.showAlarmNotification(id);
+
+  // Start looping alarm sound in this isolate.
+  // The AlarmService foreground service keeps the process alive.
+  final player = AudioPlayer();
+  try {
+    await player.setReleaseMode(ReleaseMode.loop);
+    await player.play(UrlSource('content://settings/system/alarm_alert'));
+  } catch (_) {
+    // Content URI unavailable on this ROM — notification sound still fired.
+  }
+
+  // Block until the main isolate clears the alarm (push-ups completed).
+  while (true) {
+    await Future.delayed(const Duration(seconds: 1));
+    await prefs.reload();
+    if (prefs.getInt(_activeAlarmKey) != id) break;
+  }
+
+  await player.stop();
+  await player.dispose();
 }
 
 class AlarmService {
@@ -50,12 +77,21 @@ class AlarmService {
     return prefs.getInt(_activeAlarmKey);
   }
 
+  // True when a real alarm fired and is waiting to be completed.
+  // False in simulate mode (alarmCallback was never called).
+  Future<bool> hasActiveAlarm() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_activeAlarmKey);
+  }
+
   Future<void> clearActiveAlarm() async {
     final prefs = await SharedPreferences.getInstance();
     final id = prefs.getInt(_activeAlarmKey);
     if (id != null) {
       await NotificationService.instance.cancelAlarmNotification(id);
       await prefs.remove(_activeAlarmKey);
+      // The background alarmCallback loop will detect the key is gone
+      // and stop the audio on its own within ~1 second.
     }
   }
 }
