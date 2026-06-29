@@ -1,13 +1,17 @@
+﻿# Flutter build artifacts
+alarmlock/build/
+alarmlock/.dart_tool/
+alarmlock/pubspec.lock
+alarmlock/.flutter-plugins
+alarmlock/.flutter-plugins-dependencies
+alarmlock/android/local.properties
+alarmlock/android/.gradle/
+
+# IDE
+.idea/
+.vscode/
 *.iml
-.gradle
-/local.properties
-/.idea
+
+# Misc
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
-*.jks
-*.keystore
-/app/release/
+*.log

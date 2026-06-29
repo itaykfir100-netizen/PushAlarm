@@ -1,4 +1,0 @@
--keep class com.google.mlkit.** { *; }
--keep class com.pushalarm.data.** { *; }
--keep class com.pushalarm.alarm.** { *; }
--dontwarn com.google.android.gms.**
