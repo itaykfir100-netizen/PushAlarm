@@ -1,4 +1,5 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../app_keys.dart';
 
 const _channelId = 'pushalarm_channel';
 const _channelName = 'Alarm';
@@ -61,7 +62,13 @@ class NotificationService {
 }
 
 void _onResponse(NotificationResponse response) {
-  // Handled in main.dart via navigatorKey
+  final alarmId = int.tryParse(response.payload ?? '');
+  if (alarmId == null) return;
+  navigatorKey.currentState?.pushNamedAndRemoveUntil(
+    '/workout',
+    (route) => route.isFirst,
+    arguments: alarmId,
+  );
 }
 
 @pragma('vm:entry-point')

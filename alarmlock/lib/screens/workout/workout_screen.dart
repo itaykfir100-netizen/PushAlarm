@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
   final PoseDetector _detector = PoseDetector(
     options: PoseDetectorOptions(mode: PoseDetectionMode.stream),
   );
+  final AudioPlayer _audioPlayer = AudioPlayer();
   bool _isDetecting = false;
 
   List<Pose> _poses = [];
@@ -45,6 +47,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     WakelockPlus.enable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initCamera();
+    _startAlarmSound();
   }
 
   @override
@@ -55,6 +58,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     _controller?.stopImageStream();
     _controller?.dispose();
     _detector.close();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -65,6 +69,18 @@ class _WorkoutScreenState extends State<WorkoutScreen>
       _controller?.stopImageStream();
     } else if (state == AppLifecycleState.resumed) {
       _initCamera();
+    }
+  }
+
+  Future<void> _startAlarmSound() async {
+    try {
+      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
+      // Android system alarm sound URI
+      await _audioPlayer.play(
+        UrlSource('content://settings/system/alarm_alert'),
+      );
+    } catch (_) {
+      // Fallback: silence — alarm was already triggered via notification sound
     }
   }
 
@@ -88,7 +104,6 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     if (!mounted) return;
 
     setState(() {});
-
     _controller!.startImageStream(_processFrame);
   }
 
@@ -103,22 +118,48 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     }
 
     _detector.processImage(inputImage).then((poses) {
-      if (!mounted) return;
+      if (!mounted) {
+        _isDetecting = false;
+        return;
+      }
+
+      // Compute rep state changes BEFORE setState to avoid nested setState.
+      bool shouldComplete = false;
+      int newRepCount = _repCount;
+      _PushUpPhase newPhase = _phase;
+
+      if (poses.isNotEmpty) {
+        final result = _computeRepState(
+          poses.first, _repCount, _phase, widget.target,
+        );
+        newRepCount = result.$1;
+        newPhase = result.$2;
+        shouldComplete = result.$3;
+      }
+
       setState(() {
         _poses = poses;
         _imageSize = Size(image.width.toDouble(), image.height.toDouble());
-        _updateRepCount(poses);
+        _repCount = newRepCount;
+        _phase = newPhase;
       });
+
+      if (shouldComplete && !_done) _onComplete();
+
       _isDetecting = false;
     }).catchError((_) {
       _isDetecting = false;
     });
   }
 
-  void _updateRepCount(List<Pose> poses) {
-    if (poses.isEmpty) return;
-    final pose = poses.first;
-
+  // Pure function — no setState calls inside.
+  // Returns (newRepCount, newPhase, targetReached).
+  (int, _PushUpPhase, bool) _computeRepState(
+    Pose pose,
+    int currentReps,
+    _PushUpPhase currentPhase,
+    int target,
+  ) {
     final lShoulder = pose.landmarks[PoseLandmarkType.leftShoulder];
     final lElbow = pose.landmarks[PoseLandmarkType.leftElbow];
     final lWrist = pose.landmarks[PoseLandmarkType.leftWrist];
@@ -128,47 +169,58 @@ class _WorkoutScreenState extends State<WorkoutScreen>
 
     if (lShoulder == null || lElbow == null || lWrist == null ||
         rShoulder == null || rElbow == null || rWrist == null) {
-      return;
+      return (currentReps, currentPhase, false);
     }
 
-    final minLikelihood = [
-      lShoulder, lElbow, lWrist, rShoulder, rElbow, rWrist
-    ].map((l) => l.likelihood).reduce((a, b) => a < b ? a : b);
+    final minLikelihood = [lShoulder, lElbow, lWrist, rShoulder, rElbow, rWrist]
+        .map((l) => l.likelihood)
+        .reduce((a, b) => a < b ? a : b);
 
-    if (minLikelihood < 0.5) return;
+    if (minLikelihood < 0.5) return (currentReps, currentPhase, false);
 
-    final leftAngle = elbowAngle(lShoulder, lElbow, lWrist);
-    final rightAngle = elbowAngle(rShoulder, rElbow, rWrist);
-    final avgAngle = (leftAngle + rightAngle) / 2;
+    final avgAngle =
+        (elbowAngle(lShoulder, lElbow, lWrist) +
+            elbowAngle(rShoulder, rElbow, rWrist)) /
+        2;
 
-    if (avgAngle < 90 && _phase != _PushUpPhase.down) {
-      _phase = _PushUpPhase.down;
-    } else if (avgAngle > 160 && _phase == _PushUpPhase.down) {
-      _phase = _PushUpPhase.up;
-      _repCount++;
-      if (_repCount >= widget.target) {
-        _onComplete();
-      }
+    var reps = currentReps;
+    var phase = currentPhase;
+
+    if (avgAngle < 90 && phase != _PushUpPhase.down) {
+      phase = _PushUpPhase.down;
+    } else if (avgAngle > 160 && phase == _PushUpPhase.down) {
+      phase = _PushUpPhase.up;
+      reps++;
     }
+
+    return (reps, phase, reps >= target);
   }
 
   Future<void> _onComplete() async {
     if (_done) return;
-    setState(() => _done = true);
+    _done = true;
 
+    await _audioPlayer.stop();
     await _controller?.stopImageStream();
     await AlarmService.instance.clearActiveAlarm();
 
-    final log = WorkoutLog(
+    // Reschedule alarm for its next occurrence
+    final alarm = await DatabaseHelper.instance.getAlarm(widget.alarmId);
+    if (alarm != null && alarm.isEnabled) {
+      await AlarmService.instance.scheduleAlarm(alarm);
+    }
+
+    await DatabaseHelper.instance.insertLog(WorkoutLog(
       alarmId: widget.alarmId,
       date: DateTime.now(),
       pushUpsCompleted: _repCount,
       targetPushUps: widget.target,
-    );
-    await DatabaseHelper.instance.insertLog(log);
-    if (mounted) {
-      await context.read<StatsProvider>().load();
-    }
+    ));
+
+    if (!mounted) return;
+    final statsProvider = context.read<StatsProvider>();
+    final nav = Navigator.of(context);
+    await statsProvider.load();
 
     if (!mounted) return;
     showDialog(
@@ -185,8 +237,8 @@ class _WorkoutScreenState extends State<WorkoutScreen>
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
+              nav.pop();
+              nav.pop();
             },
             child: const Text('Done', style: TextStyle(color: kGreen)),
           ),
@@ -199,23 +251,19 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     final camera = _camera;
     if (camera == null) return null;
 
-    final sensorOrientation = camera.sensorOrientation;
-    InputImageRotation? rotation;
-
+    InputImageRotation rotation;
     if (Platform.isAndroid) {
-      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+      rotation = InputImageRotationValue.fromRawValue(camera.sensorOrientation)
+          ?? InputImageRotation.rotation0deg;
     } else {
       rotation = InputImageRotation.rotation0deg;
     }
-    rotation ??= InputImageRotation.rotation0deg;
     _rotation = rotation;
 
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (format == null) return null;
+    if (format == null || image.planes.isEmpty) return null;
 
-    if (image.planes.isEmpty) return null;
     final plane = image.planes.first;
-
     return InputImage.fromBytes(
       bytes: plane.bytes,
       metadata: InputImageMetadata(
@@ -235,33 +283,32 @@ class _WorkoutScreenState extends State<WorkoutScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Camera preview
           if (ctrl != null && ctrl.value.isInitialized)
             CameraPreview(ctrl),
 
-          // Skeleton overlay
           if (_poses.isNotEmpty && _imageSize != Size.zero)
             CustomPaint(
               painter: PosePainter(
                 poses: _poses,
                 imageSize: _imageSize,
                 rotation: _rotation,
-                cameraLensDirection: _camera?.lensDirection ??
-                    CameraLensDirection.front,
+                cameraLensDirection: _camera?.lensDirection
+                    ?? CameraLensDirection.front,
               ),
             ),
 
-          // UI overlay
           SafeArea(
             child: Column(
               children: [
-                // Top bar
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
                     children: [
                       GestureDetector(
-                        onTap: () => Navigator.maybePop(context),
+                        onTap: () {
+                          _audioPlayer.stop();
+                          Navigator.maybePop(context);
+                        },
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
@@ -291,7 +338,6 @@ class _WorkoutScreenState extends State<WorkoutScreen>
 
                 const Spacer(),
 
-                // Rep counter
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 40),
                   padding: const EdgeInsets.symmetric(
@@ -322,9 +368,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
                       Text(
                         '/ ${widget.target} push-ups',
                         style: const TextStyle(
-                          color: Colors.white60,
-                          fontSize: 18,
-                        ),
+                            color: Colors.white60, fontSize: 18),
                       ),
                       const SizedBox(height: 12),
                       _PhaseIndicator(phase: _phase),
@@ -334,7 +378,6 @@ class _WorkoutScreenState extends State<WorkoutScreen>
 
                 const SizedBox(height: 16),
 
-                // Hint
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 40),
                   padding: const EdgeInsets.all(12),
@@ -367,10 +410,14 @@ class _PhaseIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, color) = switch (phase) {
       _PushUpPhase.waiting => ('Get into position', Colors.white60),
-      _PushUpPhase.down => ('DOWN ↓', const Color(0xFFFF9500)),
-      _PushUpPhase.up => ('UP ↑', kGreen),
+      _PushUpPhase.down    => ('DOWN ↓', const Color(0xFFFF9500)),
+      _PushUpPhase.up      => ('UP ↑', kGreen),
     };
-    return Text(label, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w600));
+    return Text(
+      label,
+      style: TextStyle(
+          color: color, fontSize: 16, fontWeight: FontWeight.w600),
+    );
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'app_keys.dart';
 import 'data/database_helper.dart';
 import 'models/alarm.dart';
 import 'providers/alarms_provider.dart';
@@ -54,6 +55,7 @@ class PushAlarmApp extends StatelessWidget {
         title: 'PushUp Alarm',
         theme: appTheme,
         debugShowCheckedModeBanner: false,
+        navigatorKey: navigatorKey,
         home: pendingAlarm != null
             ? WorkoutScreen(
                 alarmId: pendingAlarm!.id!,
