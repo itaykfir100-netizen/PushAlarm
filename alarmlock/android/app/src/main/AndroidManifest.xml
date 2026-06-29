@@ -18,6 +18,7 @@
         android:label="PushUp Alarm"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,30 +32,27 @@
             android:windowSoftInputMode="adjustResize">
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
+              android:resource="@style/NormalTheme" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
 
-        <!-- android_alarm_manager_plus receivers -->
+        <!-- Receives AlarmManager broadcast and starts AlarmForegroundService -->
         <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmBroadcastReceiver"
-            android:exported="false"/>
-        <receiver
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.RebootBroadcastReceiver"
-            android:enabled="false"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-            </intent-filter>
-        </receiver>
+            android:name=".AlarmReceiver"
+            android:exported="false" />
+
+        <!-- Plays looping alarm sound and shows full-screen notification -->
         <service
-            android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmService"
+            android:name=".AlarmForegroundService"
             android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE"/>
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FG_SERVICE_PERMISSION"
+                android:value="Plays looping alarm ringtone until user completes push-ups" />
+        </service>
 
         <meta-data
             android:name="flutterEmbedding"

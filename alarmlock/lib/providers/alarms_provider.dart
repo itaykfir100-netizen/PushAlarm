@@ -9,6 +9,13 @@ class AlarmsProvider extends ChangeNotifier {
 
   Future<void> load() async {
     _alarms = await DatabaseHelper.instance.getAlarms();
+    // Re-register all enabled alarms with AlarmManager on every startup.
+    // This restores alarms after a device reboot (AlarmManager clears on boot).
+    for (final alarm in _alarms) {
+      if (alarm.isEnabled && alarm.id != null) {
+        await AlarmService.instance.scheduleAlarm(alarm);
+      }
+    }
     notifyListeners();
   }
 

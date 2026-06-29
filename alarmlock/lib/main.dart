@@ -10,26 +10,25 @@ import 'screens/alarms/alarms_screen.dart';
 import 'screens/stats/stats_screen.dart';
 import 'screens/workout/workout_screen.dart';
 import 'services/alarm_service.dart';
-import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await NotificationService.instance.initialize();
-  await AlarmService.instance.init();
+  // Wire up the Kotlin → Dart MethodChannel (alarmFired, etc.)
+  AlarmService.instance.setup();
 
-  // Request permissions on first run
   await _requestPermissions();
 
-  // Check if there is an alarm waiting to be completed
+  // Check if the alarm fired while the app was closed.
+  // AlarmForegroundService writes the alarm ID to native AlarmPrefs.
   final activeAlarmId = await AlarmService.instance.getActiveAlarmId();
-  Alarm? activeAlarm;
+  Alarm? pendingAlarm;
   if (activeAlarmId != null) {
-    activeAlarm = await DatabaseHelper.instance.getAlarm(activeAlarmId);
+    pendingAlarm = await DatabaseHelper.instance.getAlarm(activeAlarmId);
   }
 
-  runApp(PushAlarmApp(pendingAlarm: activeAlarm));
+  runApp(PushAlarmApp(pendingAlarm: pendingAlarm));
 }
 
 Future<void> _requestPermissions() async {
@@ -40,9 +39,28 @@ Future<void> _requestPermissions() async {
   ].request();
 }
 
-class PushAlarmApp extends StatelessWidget {
+class PushAlarmApp extends StatefulWidget {
   const PushAlarmApp({super.key, this.pendingAlarm});
   final Alarm? pendingAlarm;
+
+  @override
+  State<PushAlarmApp> createState() => _PushAlarmAppState();
+}
+
+class _PushAlarmAppState extends State<PushAlarmApp> {
+  @override
+  void initState() {
+    super.initState();
+    // If an alarm was waiting when the app cold-started, push WorkoutScreen
+    // on top of HomeScreen after the first frame so there's always a back
+    // route to return to (fixes the black-screen-after-done bug).
+    if (widget.pendingAlarm != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        navigatorKey.currentState
+            ?.pushNamed('/workout', arguments: widget.pendingAlarm!.id!);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,12 +74,7 @@ class PushAlarmApp extends StatelessWidget {
         theme: appTheme,
         debugShowCheckedModeBanner: false,
         navigatorKey: navigatorKey,
-        home: pendingAlarm != null
-            ? WorkoutScreen(
-                alarmId: pendingAlarm!.id!,
-                target: pendingAlarm!.pushUpCount,
-              )
-            : const HomeScreen(),
+        home: const HomeScreen(),
         onGenerateRoute: (settings) {
           if (settings.name == '/workout') {
             final alarmId = settings.arguments as int;
