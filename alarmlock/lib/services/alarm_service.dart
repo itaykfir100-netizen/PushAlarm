@@ -1,6 +1,6 @@
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/alarm.dart';
 import 'notification_service.dart';
@@ -20,15 +20,12 @@ Future<void> alarmCallback(int id) async {
   await NotificationService.instance.initialize();
   await NotificationService.instance.showAlarmNotification(id);
 
-  // Start looping alarm sound in this isolate.
-  // The AlarmService foreground service keeps the process alive.
-  final player = AudioPlayer();
+  // Play looping alarm sound via RingtoneManager (bypasses DND, uses alarm
+  // volume). The AlarmService foreground service keeps this isolate alive.
+  final ringtone = FlutterRingtonePlayer();
   try {
-    await player.setReleaseMode(ReleaseMode.loop);
-    await player.play(UrlSource('content://settings/system/alarm_alert'));
-  } catch (_) {
-    // Content URI unavailable on this ROM — notification sound still fired.
-  }
+    await ringtone.playAlarm(looping: true, asAlarm: true);
+  } catch (_) {}
 
   // Block until the main isolate clears the alarm (push-ups completed).
   while (true) {
@@ -37,8 +34,9 @@ Future<void> alarmCallback(int id) async {
     if (prefs.getInt(_activeAlarmKey) != id) break;
   }
 
-  await player.stop();
-  await player.dispose();
+  try {
+    await ringtone.stop();
+  } catch (_) {}
 }
 
 class AlarmService {

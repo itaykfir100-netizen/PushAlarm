@@ -1,6 +1,6 @@
 import 'dart:io';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
@@ -29,8 +29,9 @@ class _WorkoutScreenState extends State<WorkoutScreen>
   final PoseDetector _detector = PoseDetector(
     options: PoseDetectorOptions(mode: PoseDetectionMode.stream),
   );
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final _ringtone = FlutterRingtonePlayer();
   bool _isDetecting = false;
+  bool _playingLocalSound = false;
 
   List<Pose> _poses = [];
   Size _imageSize = Size.zero;
@@ -58,7 +59,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     _controller?.stopImageStream();
     _controller?.dispose();
     _detector.close();
-    _audioPlayer.dispose();
+    if (_playingLocalSound) _ringtone.stop();
     super.dispose();
   }
 
@@ -73,16 +74,13 @@ class _WorkoutScreenState extends State<WorkoutScreen>
   }
 
   Future<void> _startAlarmSound() async {
-    // A real alarm plays audio in the background isolate (alarmCallback).
-    // Only play here when coming from the simulate button (no active alarm).
-    final isSimulate = !(await AlarmService.instance.hasActiveAlarm());
-    if (!isSimulate) return;
+    // A real alarm already plays audio in the background isolate (alarmCallback).
+    // Only play here when coming from the simulate button (no active alarm key).
+    if (await AlarmService.instance.hasActiveAlarm()) return;
 
     try {
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(
-        UrlSource('content://settings/system/alarm_alert'),
-      );
+      await _ringtone.playAlarm(looping: true, asAlarm: true);
+      _playingLocalSound = true;
     } catch (_) {}
   }
 
@@ -202,7 +200,10 @@ class _WorkoutScreenState extends State<WorkoutScreen>
     if (_done) return;
     _done = true;
 
-    await _audioPlayer.stop();
+    if (_playingLocalSound) {
+      _ringtone.stop();
+      _playingLocalSound = false;
+    }
     await _controller?.stopImageStream();
     await AlarmService.instance.clearActiveAlarm();
 
@@ -308,7 +309,7 @@ class _WorkoutScreenState extends State<WorkoutScreen>
                     children: [
                       GestureDetector(
                         onTap: () {
-                          _audioPlayer.stop();
+                          if (_playingLocalSound) _ringtone.stop();
                           Navigator.maybePop(context);
                         },
                         child: Container(
