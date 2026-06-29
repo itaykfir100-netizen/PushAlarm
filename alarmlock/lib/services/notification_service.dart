@@ -1,7 +1,9 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../app_keys.dart';
 
-const _channelId = 'pushalarm_channel';
+// Channel ID changed from pushalarm_channel so Android creates a fresh
+// channel with audioAttributesUsage = alarm (bypasses DND, uses alarm volume).
+const _channelId = 'pushalarm_alarm_v2';
 const _channelName = 'Alarm';
 
 class NotificationService {
@@ -28,6 +30,7 @@ class NotificationService {
             importance: Importance.max,
             playSound: true,
             enableVibration: true,
+            audioAttributesUsage: AudioAttributesUsage.alarm,
           ),
         );
   }

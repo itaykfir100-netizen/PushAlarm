@@ -392,7 +392,33 @@ class _WorkoutScreenState extends State<WorkoutScreen>
                   ),
                 ),
 
-                const SizedBox(height: 32),
+                const SizedBox(height: 12),
+
+                // Testing shortcut — instantly completes the workout
+                GestureDetector(
+                  onTap: _done ? null : () {
+                    setState(() => _repCount = widget.target);
+                    _onComplete();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 40),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 8, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Text(
+                      'Add ${widget.target} reps (test)',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 12),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
               ],
             ),
           ),
